@@ -1,6 +1,8 @@
 #!/usr/bin/perl -w
 use strict;
 
+# WIP: not useful
+
 # From https://en.wikipedia.org/wiki/Newick_format
 #
 # Tree -> Subtree ";"

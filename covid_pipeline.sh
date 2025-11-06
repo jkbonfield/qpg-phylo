@@ -113,10 +113,21 @@ echo ":- Evaluating iqtree3 tree"
 iqtree3 -rf lineage.nwk aligned.fa.treefile >rf.out2
 tail -1 aligned.fa.treefile.rfdist
 
+
+# --- Build tree with maple
+echo ":- Running iqtree3 $iqtree3_args -s"
+/usr/bin/time -f "$time_fmt" sh -c "eval maple.sh aligned.fa > maple.out"
+
+echo ":- Evaluating maple tree"
+iqtree3 -rf lineage.nwk maple_tree.treefile >rf.out3
+tail -1 maple_tree.treefile.rfdist
+
+
 echo ":- Trees:"
-echo "$out_dir/lineage.nwk            Lineage computed tree"
-echo "$out_dir/aligned.compat.nwk     Maximum Compat tree"
-echo "$out_dir/aligned.fa.treefile    Maximum Likelihood tree"
+echo "$out_dir/lineage.nwk                  Lineage computed tree"
+echo "$out_dir/aligned.compat.nwk           Maximum Compat tree"
+echo "$out_dir/aligned.fa.treefile          Maximum Likelihood tree"
+echo "$out_dir/maple_tree.treefile.rfdist   Maximum Likelihood tree"
 echo
 echo "Use https://itol.embl.de/ page to try viewing trees"
 

@@ -135,7 +135,15 @@ sub tree_to_newick {
 #my $str = "(A,B,(C,D)E)F;";
 #my $str = "(A,B,(C,D));";
 
-my $str = shift(@ARGV);
+my $str = "";
+if ($ARGV[0] eq "-t") {
+    $str = $ARGV[1];
+} else {
+    while (<>) {
+	$str .= $_;
+    }
+}
+$str =~ tr/\012//d;
 
 my ($root, $tree, $parent, $leaf) = parse_tree($str);
 
