@@ -5,6 +5,8 @@ seed=0; # unused currently. Need to replace shuf
 out_dir=phylo.out
 compat_args=""
 iqtree3_args=""
+noise=0; # Fraction of bases to randomly edit with noise
+noise_seed=0
 
 ref=/nfs/srpipe_references/references/SARS-CoV-2/default/all/fasta/MN908947.3.fa
 
@@ -32,6 +34,16 @@ do
             shift 2
             continue
             ;;
+	"-N")
+	    noise=$2
+	    shift 2
+	    continue
+	    ;;
+	"-S")
+	    noise_seed=$2
+	    shift 2
+	    continue
+	    ;;
         "-o")
             out_dir=$2
             shift 2
@@ -94,44 +106,88 @@ align_seqs.pl $ref unaligned.fa > aligned.fa
 #echo ":- Aligning sequences with MAFFT"
 #align_seqs_mafft.pl unaligned.fa > aligned.fa
 
+#--- Add noise to the sequences
+if [ "$noise" != "0" ]
+then
+    echo ":- Adding noise at rate $noise"
+    $QDIR/add_noise2.pl $noise $noise_seed 10 aligned.fa
+fi
 
-#--- Build tree with compat
-time_fmt='Elapsed %e %E\nCPU     %U\nSystem  %S\nMax RSS %M KB'
-echo ":- Running compat $compat_args"
-/usr/bin/time -f "$time_fmt" sh -c "eval compat.sh $compat_args aligned.fa aligned.compat.nwk 2> compat.out"
+for aligned in aligned.fa aligned.fa.? aligned.fa.??
+do
+    if [ ! -e $aligned ]
+    then
+	continue
+    fi
 
-echo ":- Evaluating compat tree"
-iqtree3 -rf lineage.nwk aligned.compat.nwk >rf.out1
-tail -1 aligned.compat.nwk.rfdist
+    echo
+    echo "=== Processing $aligned ===";
 
+    #--- Build tree with compat
+    time_fmt='Elapsed %e %E\nCPU     %U\nSystem  %S\nMax RSS %M KB'
+    echo ":- Running compat $compat_args $aligned"
+    /usr/bin/time -f "$time_fmt" sh -c "eval compat.sh $compat_args $aligned $aligned.compat.nwk 2>&1 | zstd -9 > $aligned.compat.out.zstd"
 
-# --- Build tree with iqtree3
-echo ":- Running iqtree3 $iqtree3_args -s"
-/usr/bin/time -f "$time_fmt" sh -c "eval iqtree3 --redo -s aligned.fa $iqtree3_args > iqtree3.out"
-
-echo ":- Evaluating iqtree3 tree"
-iqtree3 -rf lineage.nwk aligned.fa.treefile >rf.out2
-tail -1 aligned.fa.treefile.rfdist
-
-
-# --- Build tree with maple
-echo ":- Running iqtree3 $iqtree3_args -s"
-/usr/bin/time -f "$time_fmt" sh -c "eval maple.sh aligned.fa > maple.out"
-
-echo ":- Evaluating maple tree"
-iqtree3 -rf lineage.nwk maple_tree.treefile >rf.out3
-tail -1 maple_tree.treefile.rfdist
+    echo ":- Evaluating compat tree"
+    t=$aligned.compat.nwk
+    iqtree3 -rf lineage.nwk $t >/dev/null
+    tail -1 $t.rfdist
+    $QDIR/tree_score3lin.pl $t | tail -1 > $t.score
 
 
-echo ":- Trees:"
-echo "$out_dir/lineage.nwk                  Lineage computed tree"
-echo "$out_dir/aligned.compat.nwk           Maximum Compat tree"
-echo "$out_dir/aligned.fa.treefile          Maximum Likelihood tree"
-echo "$out_dir/maple_tree.treefile.rfdist   Maximum Likelihood tree"
-echo
-echo "Use https://itol.embl.de/ page to try viewing trees"
+     #--- Build tree with compat
+     time_fmt='Elapsed %e %E\nCPU     %U\nSystem  %S\nMax RSS %M KB'
+     echo ":- Running compat $compat_args"
+     $QDIR/5to2base.pl $aligned > $aligned.1hot
+     /usr/bin/time -f "$time_fmt" sh -c "eval compat.sh $compat_args $aligned.1hot $aligned.1hot.compat.nwk 2>&1 | zstd -9 > $aligned.1hot.compat.out.zstd"
+ 
+#     echo ":- Evaluating compat one-hot tree"
+#     t=$aligned.1hot.compat.nwk
+#     iqtree3 -rf lineage.nwk $t >/dev/null
+#     tail -1 $t.rfdist
+#     $QDIR/tree_score3lin.pl $t | tail -1 > $t.score
 
-# 10    226 296
-# 10    231 297
-# 100   223 297
-# 100   221 296
+    #--- Build tree with compat
+    time_fmt='Elapsed %e %E\nCPU     %U\nSystem  %S\nMax RSS %M KB'
+    echo ":- Running compat $compat_args $aligned.Nhot"
+    $QDIR/4to2baseN.pl $aligned > $aligned.Nhot
+    /usr/bin/time -f "$time_fmt" sh -c "eval compat.sh $compat_args $aligned.Nhot $aligned.Nhot.compat.nwk 2>&1 | zstd -9 > $aligned.Nhot.compat.out.zstd"
+
+    echo ":- Evaluating compat N-hot tree"
+    t=$aligned.Nhot.compat.nwk
+    iqtree3 -rf lineage.nwk $t >/dev/null
+    tail -1 $t.rfdist
+    $QDIR/tree_score3lin.pl $t | tail -1 > $t.score
+    
+
+    # --- Build tree with iqtree3
+    echo ":- Running iqtree3 $iqtree3_args -s"
+    /usr/bin/time -f "$time_fmt" sh -c "eval iqtree3 --redo -s $aligned $iqtree3_args > $aligned.iqtree3.out"
+
+    echo ":- Evaluating iqtree3 tree"
+    t=$aligned.treefile
+    iqtree3 -rf lineage.nwk $t >/dev/null
+    tail -1 $t.rfdist
+    $QDIR/tree_score3lin.pl $t | tail -1 > $t.score
+
+
+#    # --- Build tree with maple
+#    echo ":- Running maple"
+#    /usr/bin/time -f "$time_fmt" sh -c "eval maple.sh $aligned | zstd -9 > $aligned.maple.out.zstd"
+#
+#    echo ":- Evaluating maple tree"
+#    t=$aligned.maple_tree.tree
+#    iqtree3 -rf lineage.nwk $t >/dev/null
+#    iqtree3 -rf lineage.nwk $t >/dev/null
+#    tail -1 $t.rfdist
+#    $QDIR/tree_score3lin.pl $t | tail -1 > $t.score
+done
+
+
+# echo ":- Trees:"
+# echo "$out_dir/lineage.nwk                  Lineage computed tree"
+# echo "$out_dir/aligned.compat.nwk           Maximum Compat tree"
+# echo "$out_dir/aligned.fa.treefile          Maximum Likelihood tree"
+# echo "$out_dir/maple_tree.treefile.rfdist   Maximum Likelihood tree"
+# echo
+# echo "Use https://itol.embl.de/ page to try viewing trees"
