@@ -1,6 +1,12 @@
 #!/usr/bin/perl -w
 use strict;
 
+my $max_dist = 5e-5;
+if ($ARGV[0] eq "-d") {
+    shift(@ARGV);
+    $max_dist = shift(@ARGV);
+}
+
 # NB doesn't (yet) flatten the tree, so it's misnamed.
 # We assign lineages as before based on what's present in the children,
 # but we then walk the tree, sorting child ordering by lineage.
@@ -134,7 +140,12 @@ sub tree_to_newick2 {
 	    }
 	    push(@ele, "(" . tree_to_newick2($tree, $length, $n) . ")$name$len");
 	} else {
-	    push(@ele, $n);
+	    my $len = "";
+	    if (defined($length->{$n})) {
+		my $l = $length->{$n};
+		$len = ":$l";
+	    }
+	    push(@ele, $n . $len);
 	}
     }
 
@@ -148,8 +159,6 @@ sub tree_to_newick {
 
 #print_tree($tree, $length, $root);
 
-#my $max_dist = 5e-5;
-my $max_dist = 1e-4;
 # Finds all nodes within a specific distance.
 # Returns a list of close nodes,  list of far nodes, and a hash of node-to-distance.
 # (All 3 as references)
@@ -211,14 +220,16 @@ sub merge_nodes {
     my $min_far_dist = 9e9;
     foreach (@$near) { $min_near_dist = $dist->{$_} if $min_near_dist > $dist->{$_}; }
     foreach (@$far)  { $min_far_dist  = $dist->{$_} if $min_far_dist  > $dist->{$_}; }
+    $min_near_dist /= 2; # so tree view is still visible
+    $min_far_dist /= 2;
     print "Min near = $min_near_dist,  min far = $min_far_dist\n";
 
     # Adjust the children distances
     if (scalar(@$near)) {
-	foreach (@$near) { $length->{$_} = $dist->{$_} - $min_near_dist; }
+	foreach (@$near) { $length->{$_} = $dist->{$_} - $min_near_dist + 1e-9; }
     }
     if (scalar(@$far)) {
-	foreach (@$far)  { $length->{$_} = $dist->{$_} - $min_far_dist; }
+	foreach (@$far)  { $length->{$_} = $dist->{$_} - $min_far_dist + 1e-9; }
     }
 
     # FIXME: if near or far is size <= 1, don't make a new parent node.
@@ -241,7 +252,14 @@ sub merge_nodes {
 	push(@children, @$near);
     }
 
-    if (scalar(@$far) > 0) {
+
+    # FIXME:
+    # Instead of below find the best old node for the fork of FAR.  What was it closest to?
+    # Make it a child of that instead?  Or a fork and child?
+    # Ie distance nodes are still anchored in the same place they were before, relative to
+    # what they were paired with.
+
+    if (scalar(@$far) && 0) {
 	my $mp = "F/$merge_num";
 	$merge_num++;
 	$length->{$mp} = $min_far_dist;
@@ -254,8 +272,18 @@ sub merge_nodes {
 	print "NEW NODE: tree{$mp} = $tree->{$mp}\n";
 	push(@children, $mp);
     } else {
+	# Do this first.
+	# Bubble up to find sibling that's in NEAR.
+	# Then take this out of NEAR set and replace with the parent of NEAR and this FAR.
+	# That parent then gets put into the new @childen, and we have no need to do
+	# anything with FAR then as it's included already.
+	foreach(@$far) {
+	    print "FAR: $_ ",$parent->{$_},"\n";
+	}
 	push(@children, @$far);
     }
+
+
     $tree->{$node} = join(",", @children);
 
     foreach (@children) {
@@ -337,52 +365,3 @@ print_tree_ordered($tree, $length, $root, 0);
 
 print "===\n";
 print tree_to_newick($tree, $length, $root), "\n";
-
-# # Find leftmost to start
-# my $node = $root;
-# while (exists($tree->{$node})) {
-#     print "node=$node\n";
-#     $_ = $tree->{$node};
-#     my @nodes = sort {$length->{$a} <=> $length->{$b}} split(",", $_);
-#     print "children = @nodes\n";
-#     $node = $nodes[0];
-# }
-# print "Found leftmost = $node\n\n";
-# 
-# # Walk tree.
-# $node = $root;
-# do {
-#     for (;;) {
-# 	my $p = $parent->{$node};
-# 	if (!$p) {
-# 	    $node = undef;
-# 	    last;
-# 	}
-# 	print "p=$p\n";
-# 	my @nodes = sort {$length->{$a} <=> $length->{$b}} (split(",",$tree->{$p}));
-# 	my $i = 0;
-# 	for (; $i <= $#nodes; $i++) {
-# 	    last if $nodes[$i] eq $node;
-# 	}
-# 	print ">>>Node $node, parent $p, $i of <$#nodes, lineages";
-# 	foreach my $l (@nodes) {
-# 	    print " $l";
-# 	}
-# 	print "\n";
-# 
-# 	# Next right sibling
-# 	if ($i < $#nodes) {
-# 	    $node = $nodes[++$i];
-# 	    print "Sibling $node\n";
-# 	    # If sibling is a tree, then recurse via first child
-# 	    while (!defined($leaf->{$node})) {
-# 		@nodes = sort {$length->{$a} <=> $length->{$b}} split(",", $tree->{$node});
-# 		$node = $nodes[0];
-# 	    }
-# 	    last;
-# 	} else {
-# 	    # Or else up one level
-# 	    $node = $p;
-# 	}
-#     }
-# } while ($node);
