@@ -144,6 +144,7 @@ if ($ARGV[0] eq "-t") {
     }
 }
 $str =~ tr/\012//d;
+$str =~ s/\)[^(),:;]*/)/g;
 
 my ($root, $tree, $parent, $leaf) = parse_tree($str);
 
