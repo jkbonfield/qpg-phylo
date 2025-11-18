@@ -135,11 +135,11 @@ do
     $QDIR/tree_score3lin.pl $t | tail -1 > $t.score
 
 
-     #--- Build tree with compat
-     time_fmt='Elapsed %e %E\nCPU     %U\nSystem  %S\nMax RSS %M KB'
-     echo ":- Running compat $compat_args"
-     $QDIR/5to2base.pl $aligned > $aligned.1hot
-     /usr/bin/time -f "$time_fmt" sh -c "eval compat.sh $compat_args $aligned.1hot $aligned.1hot.compat.nwk 2>&1 | zstd -9 > $aligned.1hot.compat.out.zstd"
+#     #--- Build tree with compat
+#     time_fmt='Elapsed %e %E\nCPU     %U\nSystem  %S\nMax RSS %M KB'
+#     echo ":- Running compat $compat_args"
+#     $QDIR/5to2base.pl $aligned > $aligned.1hot
+#     /usr/bin/time -f "$time_fmt" sh -c "eval compat.sh $compat_args $aligned.1hot $aligned.1hot.compat.nwk 2>&1 | zstd -9 > $aligned.1hot.compat.out.zstd"
  
 #     echo ":- Evaluating compat one-hot tree"
 #     t=$aligned.1hot.compat.nwk
@@ -147,17 +147,17 @@ do
 #     tail -1 $t.rfdist
 #     $QDIR/tree_score3lin.pl $t | tail -1 > $t.score
 
-    #--- Build tree with compat
-    time_fmt='Elapsed %e %E\nCPU     %U\nSystem  %S\nMax RSS %M KB'
-    echo ":- Running compat $compat_args $aligned.Nhot"
-    $QDIR/4to2baseN.pl $aligned > $aligned.Nhot
-    /usr/bin/time -f "$time_fmt" sh -c "eval compat.sh $compat_args $aligned.Nhot $aligned.Nhot.compat.nwk 2>&1 | zstd -9 > $aligned.Nhot.compat.out.zstd"
-
-    echo ":- Evaluating compat N-hot tree"
-    t=$aligned.Nhot.compat.nwk
-    iqtree3 -rf lineage.nwk $t >/dev/null
-    tail -1 $t.rfdist
-    $QDIR/tree_score3lin.pl $t | tail -1 > $t.score
+#    #--- Build tree with compat
+#    time_fmt='Elapsed %e %E\nCPU     %U\nSystem  %S\nMax RSS %M KB'
+#    echo ":- Running compat $compat_args $aligned.Nhot"
+#    $QDIR/4to2baseN.pl $aligned > $aligned.Nhot
+#    /usr/bin/time -f "$time_fmt" sh -c "eval compat.sh $compat_args $aligned.Nhot $aligned.Nhot.compat.nwk 2>&1 | zstd -9 > $aligned.Nhot.compat.out.zstd"
+#
+#    echo ":- Evaluating compat N-hot tree"
+#    t=$aligned.Nhot.compat.nwk
+#    iqtree3 -rf lineage.nwk $t >/dev/null
+#    tail -1 $t.rfdist
+#    $QDIR/tree_score3lin.pl $t | tail -1 > $t.score
     
 
     # --- Build tree with iqtree3
