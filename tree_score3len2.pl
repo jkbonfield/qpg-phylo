@@ -1,14 +1,15 @@
 #!/usr/bin/perl -w
 use strict;
 
-# NB doesn't (yet) flatten the tree, so it's misnamed.
-# We assign lineages as before based on what's present in the children,
-# but we then walk the tree, sorting child ordering by lineage.
-# We then count the number of times we change lineage (ie run-length encode
-# and count lines) and also count the number of times we switch lineage
-# between leaf-children of the same parent.  These two factors produce a
-# score on the clustering potential, although to doesn't factor in
-# known covid lineage ancestry.
+#TODO:
+# Score (A,A,A,B,B,C) as 3 for C and B,B vs A,A,A rather than 2.
+# This means flattened costs more than non-flat.
+# See MG8_eg1.nwk vs MG8_eg2.nwk for example of why this would help.
+# We may even want an extra multiplier on in-node switches vs walk-switches
+# to penalise not attempting to form a tree more.
+
+# As per flatten_tree2.pl but sort nodes when recursing by branch length
+# instead of by lineage name.
 
 # From https://en.wikipedia.org/wiki/Newick_format
 #
@@ -25,6 +26,7 @@ sub parse_tree {
     my %tree = ();    # internal node name -> children
     my %parent = ();  # child name -> parent node name
     my %leaf = ();    # set if leaf node
+    my %length = ();
 
     my $node_num=0;
 
@@ -55,20 +57,29 @@ sub parse_tree {
 	    $length =~ s/^://;
 	    $list =~ s/\s+//g;
 
-	    $node = ":$node_num" unless $node ne "";
+	    $node = "/$node_num" unless $node ne "";
 	    $node = "#$node";
 	    $node_num++;
 
 	    #print "tree{$node} = \"$list\"\n";
-	    $tree{$node}=$list;
 	    foreach (split(",", $list)) {
+		m/(^[^:]*)(?::(.*))?/;
+		$_=$1 if (defined($1));
+		#print "LLL $node $length $_ $1 // $2 //\n";
 		$parent{$_} = $node;
 		$leaf{$_} = 1 if (!/^#/);
+		if (defined($2)) {
+		    $length{$_} = $2;
+		} else {
+		    $length{$_} = 0;
+		}
 	    }
+	    $list =~ s/:[0-9.e+-]*//g;
+	    $tree{$node}=$list;
 
 	    # Replace branchSet with an internal node
 	    substr($tree,$st,$len) = $node;
-	    #print "Tree is now <$tree>\n";
+	    print "Tree is now <$tree>\n";
 	}
     } while (scalar(@pos));
 
@@ -78,7 +89,7 @@ sub parse_tree {
 #	$parent{$_} = "root";
 #    }
     
-    return ($tree, \%tree, \%parent, \%leaf);
+    return ($tree, \%tree, \%parent, \%leaf, \%length);
 }
 
 my $depth=0;
@@ -146,7 +157,7 @@ if ($ARGV[0] eq "-t") {
 $str =~ tr/\012//d;
 $str =~ s/\)[^(),:;]*/)/g;
 
-my ($root, $tree, $parent, $leaf) = parse_tree($str);
+my ($root, $tree, $parent, $leaf, $length) = parse_tree($str);
 
 #print_tree($tree, $root);
 #print "\n\n\n";
@@ -162,8 +173,13 @@ sub lineage {
     return $1 if $1;
 
     if (defined($lineages{$_})) {
+	# Alphabetical is best
 	my @l = sort keys(%{$lineages{$_}});
-	#return "@l";
+
+	# However by frequency naively feels like it should be better.
+#	my %l = %{$lineages{$_}};
+#	my @l = sort {$l{$b} <=> $l{$a}} sort {$a cmp $b} keys %l;
+
 	return "~$l[0]";
     }
     return $_;
@@ -187,17 +203,40 @@ foreach (sort keys(%{$leaf})) {
 }
 my $nlineages = scalar(keys %leaf_lineage);
 
+sub hash {
+    ($_)=@_;
+    my $h=0;
+    foreach (split("",$_)) {
+	$h=(($h*31 + ord($_))) & 0xffff;
+    }
+    return $h;
+}
+
+sub linlength {
+    ($_) = @_;
+
+    # Cluster by length and resolve ties by lineage.
+    my $lineage = lineage($_);
+    $lineage = 1-(length($lineage) + hash($lineage) / 0xffff)*0.1;
+
+    if (defined($length->{$_})) {
+	return $length->{$_} + $lineage;
+    } else {
+	return $lineage;
+    }
+}
+
 # Find leftmost to start
 my $node = $root;
 while (exists($tree->{$node})) {
     print "node=$node\n";
     $_ = $tree->{$node};
     #my @nodes = sort(split(",", $_));
-    my @nodes = sort {lineage($a) cmp lineage($b)} split(",", $_);
+    my @nodes = sort {linlength($a) <=> linlength($b)} split(",", $_);
     print "children = @nodes\n";
     $node = $nodes[0];
 }
-print "=== $node",lineage($node),"\n";
+print "=== $node ",lineage($node),"\n";
 
 # Walk tree.
 # TODO: repeat walk by first / last node (left / right)?
@@ -208,7 +247,6 @@ print "=== $node",lineage($node),"\n";
 
 my $last = "";
 my $lineage_switch = 0;
-my $switch_sibling = 0;
 do {
     my $sibling = 0;
     for (;;) {
@@ -219,7 +257,7 @@ do {
 	}
 	print "p=$p\n";
 	#my @nodes = sort (split(",",$tree->{$p}));
-	my @nodes = sort {lineage($a) cmp lineage($b)} (split(",",$tree->{$p}));
+	my @nodes = sort {linlength($a) <=> linlength($b)} (split(",",$tree->{$p}));
 	my $i = 0;
 	for (; $i <= $#nodes; $i++) {
 	    last if $nodes[$i] eq $node;
@@ -238,7 +276,7 @@ do {
 	    $sibling = defined($leaf->{$node}) ? 1 : 0;
 	    while (!defined($leaf->{$node})) {
 		#@nodes = sort(split(",",$tree->{$node}));
-		@nodes = sort {lineage($a) cmp lineage($b)} split(",", $tree->{$node});
+		@nodes = sort {linlength($a) <=> linlength($b)} split(",", $tree->{$node});
 		$node = $nodes[0];
 	    }
 	    last;
@@ -254,45 +292,46 @@ do {
     if ($node && lineage($node) ne $last) {
 	print "SWITCH sibling=$sibling: $last ",lineage($node),"\n";
 	$lineage_switch++ if $last;
-	$switch_sibling++ if ($sibling && $last);
 	$last = lineage($node);
     }
 } while ($node);
 
-my $score = $lineage_switch - ($nlineages-1) + $switch_sibling;
-print "### SCORE $score\t$lineage_switch switches of $nlineages, $switch_sibling in siblings\n";
+$depth = 0;
+sub sibling_switches {
+    my ($tree, $node) = @_;
+    my $switches = 0;
+    foreach (sort $tree->{$node}) {
+	print "  "x$depth,"$node=($_)\n";
+	my @nodes = split(",",$_);
+	my %linfreq;
+	foreach (@nodes) {
+	    $linfreq{lineage($_)}++ if lineage($_) !~ /^~/;
+	}
+	my @linkeys = sort {$linfreq{$b} <=> $linfreq{$a}} keys(%linfreq);
+	foreach (@linkeys) {
+	    print "LINKEY $_ = $linfreq{$_}\n";
+	}
+	foreach (sort {lineage($a) cmp lineage($b)} @nodes) {
+	    if (defined(%{$tree}{$_})) {
+		$depth++;
+		$switches += sibling_switches($tree,$_);
+		$depth--;
+	    } else {
+		my $lin = lineage($_);
+		print "SIBLING $node // $lin $linkeys[0]\n"
+		    if $lin ne $linkeys[0] && $lin !~ /~/;
+		$switches++ if $lin ne $linkeys[0] && $lin !~ /~/;
+		print "   "x($depth+1),"CHILD $lin\n";
+	    }
+	}
+    }
 
-__END__
+    return $switches;
+}
 
-@ seq22-head2[quantum/phylo]; ./flatten_tree2.pl "`cat _tmp/out-xz.500.1/lineage.nwk`"|grep '###'
-### SCORE 0	116 switches of 117, 0 in siblings
+print "ZZZ\n"; # For ... |sed -n '/ZZZ/,$p'
+my $switches = sibling_switches($tree, $root);
+print "Switches = $switches\n";
 
-
-@ seq22-head2[quantum/phylo]; ./flatten_tree2.pl "`cat _tmp/out-xz.500.1/maple_tree.tree`"|grep '###'
-### SCORE 52	150 switches of 117, 18 in siblings
-@ seq22-head2[quantum/phylo]130; ./treedist.r _tmp/out-xz.500.1/lineage.nwk _tmp/out-xz.500.1/maple_tree.tree
-[1] 504
-[1] 396.3003
-
-
-@ seq22-head2[quantum/phylo]; ./flatten_tree2.pl "`cat _tmp/out-xz.500.1/aligned.fa.treefile`"|grep '###'
-### SCORE 57	148 switches of 117, 25 in siblings
-@ seq22-head2[quantum/phylo]134; ./treedist.r _tmp/out-xz.500.1/lineage.nwk _tmp/out-xz.500.1/aligned.fa.treefile
-[1] 500
-[1] 389.724
-
-
-@ seq22-head2[quantum/phylo]; ./flatten_tree2.pl "`cat _tmp/out-xz.500.1/aligned.compat.nwk`"|grep '###'
-### SCORE 79	137 switches of 117, 58 in siblings
-@ seq22-head2[quantum/phylo]134; ./treedist.r _tmp/out-xz.500.1/lineage.nwk _tmp/out-xz.500.1/aligned.compat.nwk
-[1] 144
-[1] 60.18528
-[1] 8.283076
-[1] 0.2546317
-
-
-Ie costs:
-	   RF    JRF    FT2(this)
-compat	   144	  60	79
-iqtree3	   500   389	57
-maple	   504	 396	52
+my $score = $lineage_switch - ($nlineages-1) + $switches;
+print "### SCORE $score\t$lineage_switch switches of $nlineages, $switches in siblings\n";

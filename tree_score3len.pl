@@ -1,6 +1,13 @@
 #!/usr/bin/perl -w
 use strict;
 
+#TODO:
+# Score (A,A,A,B,B,C) as 3 for C and B,B vs A,A,A rather than 2.
+# This means flattened costs more than non-flat.
+# See MG8_eg1.nwk vs MG8_eg2.nwk for example of why this would help.
+# We may even want an extra multiplier on in-node switches vs walk-switches
+# to penalise not attempting to form a tree more.
+
 # As per flatten_tree2.pl but sort nodes when recursing by branch length
 # instead of by lineage name.
 
@@ -72,7 +79,7 @@ sub parse_tree {
 
 	    # Replace branchSet with an internal node
 	    substr($tree,$st,$len) = $node;
-	    print "Tree is now <$tree>\n";
+	    #print "Tree is now <$tree>\n";
 	}
     } while (scalar(@pos));
 
@@ -88,6 +95,11 @@ sub parse_tree {
 my $depth=0;
 sub print_tree {
     my ($tree, $node) = @_;
+#    my %lf = ();
+#    linfreq($node, \%lf);
+#    foreach (sort {$lf{$b} <=> $lf{$a}} keys %lf) {
+#	print "  "x$depth, "$lf{$_} $_\n";
+#    }
     foreach (sort $tree->{$node}) {
 	print "  "x$depth,"$node=($_)\n";
 	my @nodes = split(",",$_);
@@ -156,6 +168,22 @@ my ($root, $tree, $parent, $leaf, $length) = parse_tree($str);
 #print "\n\n\n";
 #print_traceback($parent, "B3");
 
+# Recursive lineage frequency
+sub linfreq {
+    my ($node, $lin) = @_;
+
+    if (!defined(%{$tree}{$node})) {
+	# Leaf node
+	/_.*_([^:]*)/;
+	$lin->{$1}++;
+    } else {
+	# Tree node
+	foreach (split(",",$tree->{$node})) {
+	    linfreq($_, $lin);
+	}
+    }
+}
+
 my %lineages = ();
 sub lineage {
     ($_) = @_;
@@ -166,8 +194,13 @@ sub lineage {
     return $1 if $1;
 
     if (defined($lineages{$_})) {
+	# Alphabetical is best
 	my @l = sort keys(%{$lineages{$_}});
-	#return "@l";
+
+	# However by frequency naively feels like it should be better.
+#	my %l = %{$lineages{$_}};
+#	my @l = sort {$l{$b} <=> $l{$a}} sort keys %l;
+
 	return "~$l[0]";
     }
     return $_;
@@ -278,7 +311,8 @@ do {
     # ./flatten_tree2.pl "`cat file.nwk`" |awk '/===/ {print $3}'|uniq|wc -l
     print "=== $node ",lineage($node)," $sibling\n" if $node;
     if ($node && lineage($node) ne $last) {
-	$lineage_switch++;
+	print "SWITCH sibling=$sibling: $last ",lineage($node),"\n";
+	$lineage_switch++ if $last;
 	$last = lineage($node);
     }
 } while ($node);
